@@ -84,3 +84,18 @@ string make_dated_subdirs(const string& basedir, const struct tm* time) {
     // on any error return empty string
     return "";
 }
+
+string sanitize_filename_token(const string& value) {
+    string sanitized;
+    sanitized.reserve(value.size());
+
+    for (char c : value) {
+        if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '.' || c == '_' || c == '-') {
+            sanitized.push_back(c);
+        } else {
+            sanitized.push_back('_');
+        }
+    }
+
+    return sanitized;
+}
