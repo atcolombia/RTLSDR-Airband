@@ -150,6 +150,14 @@ TEST_F(HelperFunctionsTest, make_dated_subdirs_fail) {
     EXPECT_EQ(make_dated_subdirs("/invalid/base/dir", &time_struct), "");
 }
 
+TEST_F(HelperFunctionsTest, sanitize_filename_token_keeps_safe_characters) {
+    EXPECT_EQ(sanitize_filename_token("ABCxyz012._-"), "ABCxyz012._-");
+}
+
+TEST_F(HelperFunctionsTest, sanitize_filename_token_replaces_unsafe_characters) {
+    EXPECT_EQ(sanitize_filename_token("tower label/118.1:AM"), "tower_label_118.1_AM");
+}
+
 TEST_F(HelperFunctionsTest, make_dated_subdirs_some_exist) {
     struct tm time_struct;
 

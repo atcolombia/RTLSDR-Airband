@@ -446,9 +446,26 @@ static bool output_file_ready(channel_t* channel, output_t* output) {
         make_dir(output_dir);
     }
 
+    std::string basename = fdata->basename;
+    const std::string label_token = "{label}";
+    size_t label_pos = basename.find(label_token);
+    if (label_pos != std::string::npos) {
+        const freq_t* active_freq = &channel->freqlist[channel->freq_idx];
+        std::string label = active_freq->label != NULL ? sanitize_filename_token(active_freq->label) : "";
+        if (label.empty()) {
+            label = std::to_string(active_freq->frequency);
+            log(LOG_WARNING, "filename_template uses {label}, but frequency %d has no label; using frequency instead\n", active_freq->frequency);
+        }
+
+        while (label_pos != std::string::npos) {
+            basename.replace(label_pos, label_token.length(), label);
+            label_pos = basename.find(label_token, label_pos + label.length());
+        }
+    }
+
     // use a string stream to build the output filepath
     std::stringstream ss;
-    ss << output_dir << '/' << fdata->basename << timestamp;
+    ss << output_dir << '/' << basename << timestamp;
     if (fdata->include_freq) {
         ss << '_' << channel->freqlist[channel->freq_idx].frequency;
     }
