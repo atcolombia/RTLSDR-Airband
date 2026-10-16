@@ -30,6 +30,14 @@ static std::condition_variable queue_cv;
 static std::atomic<bool> uploader_running;
 static std::thread uploader_thread;
 
+// A single thread performs every upload, so one stalled request (e.g. a half-open
+// TCP connection whose peer vanished) must never block the queue forever.
+static const long UPLOAD_CONNECT_TIMEOUT_SECONDS = 15;
+static const long UPLOAD_TOTAL_TIMEOUT_SECONDS = 120;
+static const long UPLOAD_LOW_SPEED_LIMIT_BYTES = 1;
+static const long UPLOAD_LOW_SPEED_TIME_SECONDS = 30;
+static const long UPLOAD_TCP_KEEPALIVE_SECONDS = 15;
+
 static bool upload_file(const upload_task& task) {
     CURL* curl = curl_easy_init();
     if (!curl) {
@@ -44,6 +52,14 @@ static bool upload_file(const upload_task& task) {
 
     curl_easy_setopt(curl, CURLOPT_URL, task.config.upload_url.c_str());
     curl_easy_setopt(curl, CURLOPT_MIMEPOST, form);
+    curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
+    curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, UPLOAD_CONNECT_TIMEOUT_SECONDS);
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, UPLOAD_TOTAL_TIMEOUT_SECONDS);
+    curl_easy_setopt(curl, CURLOPT_LOW_SPEED_LIMIT, UPLOAD_LOW_SPEED_LIMIT_BYTES);
+    curl_easy_setopt(curl, CURLOPT_LOW_SPEED_TIME, UPLOAD_LOW_SPEED_TIME_SECONDS);
+    curl_easy_setopt(curl, CURLOPT_TCP_KEEPALIVE, 1L);
+    curl_easy_setopt(curl, CURLOPT_TCP_KEEPIDLE, UPLOAD_TCP_KEEPALIVE_SECONDS);
+    curl_easy_setopt(curl, CURLOPT_TCP_KEEPINTVL, UPLOAD_TCP_KEEPALIVE_SECONDS);
 
     CURLcode res = curl_easy_perform(curl);
     long http_code = 0;
