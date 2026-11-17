@@ -28,9 +28,10 @@ echo "::group::Install packages"
 export DEBIAN_FRONTEND=noninteractive
 # Debian 11 reached end of life: its security pool is no longer served by
 # deb.debian.org, so take every bullseye suite from archive.debian.org.
+# (read os-release in a subshell: it defines VERSION and would clobber ours)
 # shellcheck source=/dev/null
-. /etc/os-release
-if [ "${VERSION_CODENAME}" = "bullseye" ]; then
+CODENAME="$(. /etc/os-release && echo "${VERSION_CODENAME}")"
+if [ "${CODENAME}" = "bullseye" ]; then
   for f in /etc/apt/sources.list /etc/apt/sources.list.d/*; do
     [ -f "$f" ] || continue
     sed -i -E 's#https?://(deb|security)\.debian\.org/#http://archive.debian.org/#g' "$f"
