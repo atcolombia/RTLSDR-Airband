@@ -25,7 +25,7 @@ concurrency:
 jobs:
   build:
     name: build debian${{ matrix.debian.major }} ${{ matrix.arch.name }}
-    runs-on: ubuntu-24.04-arm
+    runs-on: ${{ matrix.arch.runner }}
     timeout-minutes: 45
     strategy:
       fail-fast: false
@@ -33,9 +33,12 @@ jobs:
         debian:
           - { codename: bullseye, major: '11' }
           - { codename: bookworm, major: '12' }
+          - { codename: trixie, major: '13' }
         arch:
-          - { platform: linux/arm/v7, name: linux-arm }
-          - { platform: linux/arm64, name: linux-arm64 }
+          - { platform: linux/arm/v7, name: linux-arm, runner: ubuntu-24.04-arm }
+          - { platform: linux/arm64, name: linux-arm64, runner: ubuntu-24.04-arm }
+          # x86_64 receivers (mini PCs) run the same code
+          - { platform: linux/amd64, name: linux-amd64, runner: ubuntu-24.04 }
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -118,11 +121,12 @@ jobs:
           mkdir release
           shopt -s nullglob
           entries=(builds/*.build.json)
-          if [ "${#entries[@]}" -ne 4 ]; then
-            echo "::error::expected 4 builds, got ${#entries[@]}"
+          # 3 Debian releases x 3 architectures
+          if [ "${#entries[@]}" -ne 9 ]; then
+            echo "::error::expected 9 builds, got ${#entries[@]}"
             exit 1
           fi
-          version="$(jq -rs '.[0].file | capture("^rtl_airband-(?<v>.+)-debian[0-9]+-linux-arm(64)?$").v' "${entries[@]}")"
+          version="$(jq -rs '.[0].file | capture("^rtl_airband-(?<v>.+)-debian[0-9]+-linux-(arm|arm64|amd64)$").v' "${entries[@]}")"
           echo "version=${version}" >> "$GITHUB_OUTPUT"
           for entry in "${entries[@]}"; do
             file="$(jq -r .file "${entry}")"
@@ -150,7 +154,9 @@ jobs:
   publish:
     name: publish GitHub Release
     needs: assemble
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    # Tags pushed by the Bump version workflow use GITHUB_TOKEN and do not
+    # trigger this workflow, so a manual run on a v* tag publishes too.
+    if: startsWith(github.ref, 'refs/tags/v') && github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -175,5 +181,5 @@ jobs:
             gh release create "${TAG}" release/* \
               --verify-tag \
               --title "${TAG}" \
-              --notes "Raspberry Pi builds of rtl_airband ${TAG} (commit ${GITHUB_SHA}). See SHA256SUMS and manifest.json."
+              --notes "Receiver builds (Raspberry Pi and x86_64) of rtl_airband ${TAG} (commit ${GITHUB_SHA}). See SHA256SUMS and manifest.json."
           fi
