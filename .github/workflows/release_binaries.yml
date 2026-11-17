@@ -1,0 +1,179 @@
+name: Release Binaries
+
+# Builds portable Raspberry Pi binaries of rtl_airband for the ATColombia
+# receiver fleet. Publishing to a GitHub Release only happens on push of a
+# v* tag; pull requests touching this workflow and manual runs are dry runs
+# that build, test and assemble the release files as workflow artifacts.
+# See docs/ATCOLOMBIA_RELEASES.md for the artifact contract.
+
+on:
+  push:
+    tags: ['v*']
+  pull_request:
+    paths:
+      - .github/workflows/release_binaries.yml
+      - .github/release_build.sh
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-binaries-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build:
+    name: build debian${{ matrix.debian.major }} ${{ matrix.arch.name }}
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        debian:
+          - { codename: bullseye, major: '11' }
+          - { codename: bookworm, major: '12' }
+        arch:
+          - { platform: linux/arm/v7, name: linux-arm }
+          - { platform: linux/arm64, name: linux-arm64 }
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # the version string comes from git describe
+
+      - name: Resolve version
+        id: version
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            version="${GITHUB_REF_NAME}"
+          else
+            version="$(git describe --tags --abbrev --dirty --always)"
+          fi
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "Version: ${version}"
+
+      - name: Build and test in debian:${{ matrix.debian.codename }} (${{ matrix.arch.platform }})
+        run: |
+          docker run --rm \
+            --platform "${{ matrix.arch.platform }}" \
+            -v "${GITHUB_WORKSPACE}:/src" \
+            -w /src \
+            "debian:${{ matrix.debian.codename }}" \
+            bash .github/release_build.sh \
+              "${{ steps.version.outputs.version }}" \
+              "${{ matrix.debian.major }}" \
+              "${{ matrix.arch.name }}"
+          # the container runs as root; hand the outputs back to the runner user
+          sudo chown -R "$(id -u):$(id -g)" build-release
+
+      - name: Write manifest entry
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          OS_MAJOR: ${{ matrix.debian.major }}
+          ARCH_NAME: ${{ matrix.arch.name }}
+        run: |
+          dist=build-release/dist
+          file="rtl_airband-${VERSION}-debian${OS_MAJOR}-${ARCH_NAME}"
+          test -x "${dist}/${file}"
+          jq -n \
+            --arg file "${file}" \
+            --arg os "debian-${OS_MAJOR}" \
+            --arg arch "${ARCH_NAME}" \
+            --arg sha256 "$(sha256sum "${dist}/${file}" | cut -d ' ' -f 1)" \
+            --argjson size_bytes "$(stat -c %s "${dist}/${file}")" \
+            --arg version_output "$(cat "${dist}/${file}.version.txt")" \
+            --arg ldd "$(cat "${dist}/${file}.ldd.txt")" \
+            '{file: $file, os: $os, arch: $arch, sha256: $sha256, size_bytes: $size_bytes, version_output: $version_output, ldd: $ldd}' \
+            > "${dist}/${file}.build.json"
+          rm "${dist}/${file}.version.txt" "${dist}/${file}.ldd.txt"
+          cat "${dist}/${file}.build.json"
+
+      - name: Upload build
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-debian${{ matrix.debian.major }}-${{ matrix.arch.name }}
+          path: build-release/dist/
+          if-no-files-found: error
+          retention-days: 14
+
+  assemble:
+    name: assemble release files
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      version: ${{ steps.assemble.outputs.version }}
+    steps:
+      - name: Download builds
+        uses: actions/download-artifact@v4
+        with:
+          pattern: build-*
+          path: builds
+          merge-multiple: true
+
+      - name: Assemble SHA256SUMS and manifest.json
+        id: assemble
+        run: |
+          mkdir release
+          shopt -s nullglob
+          entries=(builds/*.build.json)
+          if [ "${#entries[@]}" -ne 4 ]; then
+            echo "::error::expected 4 builds, got ${#entries[@]}"
+            exit 1
+          fi
+          version="$(jq -rs '.[0].file | capture("^rtl_airband-(?<v>.+)-debian[0-9]+-linux-arm(64)?$").v' "${entries[@]}")"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          for entry in "${entries[@]}"; do
+            file="$(jq -r .file "${entry}")"
+            install -m 0755 "builds/${file}" "release/${file}"
+          done
+          (cd release && sha256sum rtl_airband-* > SHA256SUMS)
+          (cd release && sha256sum -c SHA256SUMS)
+          jq -s \
+            --arg version "${version}" \
+            --arg commit "${GITHUB_SHA}" \
+            '{version: $version, commit: $commit, builds: (sort_by(.os, .arch))}' \
+            "${entries[@]}" > release/manifest.json
+          cat release/SHA256SUMS
+          cat release/manifest.json
+          ls -l release
+
+      - name: Upload release files
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-files
+          path: release/
+          if-no-files-found: error
+          retention-days: 14
+
+  publish:
+    name: publish GitHub Release
+    needs: assemble
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Download release files
+        uses: actions/download-artifact@v4
+        with:
+          name: release-files
+          path: release
+
+      - name: Create or update release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          chmod 0755 release/rtl_airband-*
+          if gh release view "${TAG}" >/dev/null 2>&1; then
+            gh release upload "${TAG}" release/* --clobber
+          else
+            gh release create "${TAG}" release/* \
+              --verify-tag \
+              --title "${TAG}" \
+              --notes "Raspberry Pi builds of rtl_airband ${TAG} (commit ${GITHUB_SHA}). See SHA256SUMS and manifest.json."
+          fi
