@@ -32,6 +32,9 @@ version is the `git describe --tags` output instead of a tag name.
 | bullseye (11) | `linux/arm64` | `linux-arm64` |
 | bookworm (12) | `linux/arm/v7` (armhf) | `linux-arm` |
 | bookworm (12) | `linux/arm64` | `linux-arm64` |
+| trixie (13) | `linux/arm/v7` (armhf) | `linux-arm` |
+| trixie (13) | `linux/arm64` | `linux-arm64` |
+| bullseye/bookworm/trixie | `linux/amd64` (x86_64 receivers) | `linux-amd64` |
 
 Each target is built inside the matching `debian:<codename>` container on a
 native `ubuntu-24.04-arm` runner, with the same CMake options as production:
@@ -50,7 +53,7 @@ libcurl), so the receiver must run the matching Debian version.
 
 The ATColombia receiver server's importer depends on this exactly.
 
-- Binary: `rtl_airband-<tag>-debian<11|12>-<linux-arm|linux-arm64>`, for
+- Binary: `rtl_airband-<tag>-debian<11|12|13>-<linux-arm|linux-arm64|linux-amd64>`, for
   example `rtl_airband-v0.0.3-debian12-linux-arm64`. Stripped, mode 0755.
 - `SHA256SUMS`: one `sha256sum` line per binary.
 - `manifest.json`:
