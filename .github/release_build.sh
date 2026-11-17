@@ -26,6 +26,18 @@ echo "::endgroup::"
 
 echo "::group::Install packages"
 export DEBIAN_FRONTEND=noninteractive
+# Debian 11 reached end of life: its security pool is no longer served by
+# deb.debian.org, so take every bullseye suite from archive.debian.org.
+# shellcheck source=/dev/null
+. /etc/os-release
+if [ "${VERSION_CODENAME}" = "bullseye" ]; then
+  for f in /etc/apt/sources.list /etc/apt/sources.list.d/*; do
+    [ -f "$f" ] || continue
+    sed -i -E 's#https?://(deb|security)\.debian\.org/#http://archive.debian.org/#g' "$f"
+  done
+  cat /etc/apt/sources.list /etc/apt/sources.list.d/* 2>/dev/null || true
+  echo 'Acquire::Check-Valid-Until "false";' > /etc/apt/apt.conf.d/99archive
+fi
 apt-get update -y
 apt-get install -y --no-install-recommends \
   build-essential cmake pkg-config ca-certificates \

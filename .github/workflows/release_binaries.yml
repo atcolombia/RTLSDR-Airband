@@ -64,6 +64,8 @@ jobs:
               "${{ steps.version.outputs.version }}" \
               "${{ matrix.debian.major }}" \
               "${{ matrix.arch.name }}"
+          # the container runs as root; hand the outputs back to the runner user
+          sudo chown -R "$(id -u):$(id -g)" build-release
 
       - name: Write manifest entry
         env:
