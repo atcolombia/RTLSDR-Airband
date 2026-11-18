@@ -24,7 +24,7 @@ concurrency:
 
 jobs:
   build:
-    name: build debian${{ matrix.debian.major }} ${{ matrix.arch.name }}
+    name: build debian${{ matrix.debian.major }} ${{ matrix.arch.name }} ${{ matrix.flavor.name }}
     runs-on: ${{ matrix.arch.runner }}
     timeout-minutes: 45
     strategy:
@@ -39,6 +39,11 @@ jobs:
           - { platform: linux/arm64, name: linux-arm64, runner: ubuntu-24.04-arm }
           # x86_64 receivers (mini PCs) run the same code
           - { platform: linux/amd64, name: linux-amd64, runner: ubuntu-24.04 }
+        # plain = RTL-SDR only (most receivers have no libSoapySDR);
+        # soapy = also SoapySDR, for Airspy receivers
+        flavor:
+          - { name: plain, suffix: '' }
+          - { name: soapy, suffix: '-soapy' }
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -66,7 +71,8 @@ jobs:
             bash .github/release_build.sh \
               "${{ steps.version.outputs.version }}" \
               "${{ matrix.debian.major }}" \
-              "${{ matrix.arch.name }}"
+              "${{ matrix.arch.name }}" \
+              "${{ matrix.flavor.name }}"
           # the container runs as root; hand the outputs back to the runner user
           sudo chown -R "$(id -u):$(id -g)" build-release
 
@@ -75,19 +81,22 @@ jobs:
           VERSION: ${{ steps.version.outputs.version }}
           OS_MAJOR: ${{ matrix.debian.major }}
           ARCH_NAME: ${{ matrix.arch.name }}
+          FLAVOR: ${{ matrix.flavor.name }}
+          SUFFIX: ${{ matrix.flavor.suffix }}
         run: |
           dist=build-release/dist
-          file="rtl_airband-${VERSION}-debian${OS_MAJOR}-${ARCH_NAME}"
+          file="rtl_airband-${VERSION}-debian${OS_MAJOR}-${ARCH_NAME}${SUFFIX}"
           test -x "${dist}/${file}"
           jq -n \
             --arg file "${file}" \
             --arg os "debian-${OS_MAJOR}" \
             --arg arch "${ARCH_NAME}" \
+            --arg flavor "${FLAVOR}" \
             --arg sha256 "$(sha256sum "${dist}/${file}" | cut -d ' ' -f 1)" \
             --argjson size_bytes "$(stat -c %s "${dist}/${file}")" \
             --arg version_output "$(cat "${dist}/${file}.version.txt")" \
             --arg ldd "$(cat "${dist}/${file}.ldd.txt")" \
-            '{file: $file, os: $os, arch: $arch, sha256: $sha256, size_bytes: $size_bytes, version_output: $version_output, ldd: $ldd}' \
+            '{file: $file, os: $os, arch: $arch, flavor: $flavor, sha256: $sha256, size_bytes: $size_bytes, version_output: $version_output, ldd: $ldd}' \
             > "${dist}/${file}.build.json"
           rm "${dist}/${file}.version.txt" "${dist}/${file}.ldd.txt"
           cat "${dist}/${file}.build.json"
@@ -95,7 +104,7 @@ jobs:
       - name: Upload build
         uses: actions/upload-artifact@v4
         with:
-          name: build-debian${{ matrix.debian.major }}-${{ matrix.arch.name }}
+          name: build-debian${{ matrix.debian.major }}-${{ matrix.arch.name }}-${{ matrix.flavor.name }}
           path: build-release/dist/
           if-no-files-found: error
           retention-days: 14
@@ -121,12 +130,12 @@ jobs:
           mkdir release
           shopt -s nullglob
           entries=(builds/*.build.json)
-          # 3 Debian releases x 3 architectures
-          if [ "${#entries[@]}" -ne 9 ]; then
-            echo "::error::expected 9 builds, got ${#entries[@]}"
+          # 3 Debian releases x 3 architectures x 2 flavors
+          if [ "${#entries[@]}" -ne 18 ]; then
+            echo "::error::expected 18 builds, got ${#entries[@]}"
             exit 1
           fi
-          version="$(jq -rs '.[0].file | capture("^rtl_airband-(?<v>.+)-debian[0-9]+-linux-(arm|arm64|amd64)$").v' "${entries[@]}")"
+          version="$(jq -rs '.[0].file | capture("^rtl_airband-(?<v>.+)-debian[0-9]+-linux-(arm|arm64|amd64)(-soapy)?$").v' "${entries[@]}")"
           echo "version=${version}" >> "$GITHUB_OUTPUT"
           for entry in "${entries[@]}"; do
             file="$(jq -r .file "${entry}")"
@@ -137,7 +146,7 @@ jobs:
           jq -s \
             --arg version "${version}" \
             --arg commit "${GITHUB_SHA}" \
-            '{version: $version, commit: $commit, builds: (sort_by(.os, .arch))}' \
+            '{version: $version, commit: $commit, builds: (sort_by(.os, .arch, .flavor))}' \
             "${entries[@]}" > release/manifest.json
           cat release/SHA256SUMS
           cat release/manifest.json
