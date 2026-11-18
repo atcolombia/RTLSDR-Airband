@@ -2,8 +2,11 @@
 # Builds a portable rtl_airband release binary inside a debian:<codename>
 # container. Used by .github/workflows/release_binaries.yml.
 #
-# Usage: release_build.sh <version> <debian-major> <arch-name>
-#   e.g. release_build.sh v0.0.3 12 linux-arm64
+# Usage: release_build.sh <version> <debian-major> <arch-name> <flavor>
+#   e.g. release_build.sh v0.0.5 12 linux-arm64 plain
+# flavor "plain" builds RTL-SDR only, so it runs on receivers without
+# libSoapySDR; "soapy" also enables SoapySDR (Airspy receivers) and gets a
+# "-soapy" suffix.
 #
 # Must run from the repository root (mounted at /src). Outputs go to
 # build-release/dist/ (ignored by git through the build*/ pattern so the
@@ -13,10 +16,16 @@ set -euo pipefail
 VERSION="$1"
 DEBIAN_MAJOR="$2"
 ARCH_NAME="$3"
+FLAVOR="${4:-plain}"
+case "${FLAVOR}" in
+  plain) SOAPYSDR=OFF; SUFFIX="" ;;
+  soapy) SOAPYSDR=ON; SUFFIX="-soapy" ;;
+  *) echo "::error::unknown flavor ${FLAVOR}"; exit 1 ;;
+esac
 
 BUILD_DIR="build-release"
 DIST_DIR="${BUILD_DIR}/dist"
-ASSET="rtl_airband-${VERSION}-debian${DEBIAN_MAJOR}-${ARCH_NAME}"
+ASSET="rtl_airband-${VERSION}-debian${DEBIAN_MAJOR}-${ARCH_NAME}${SUFFIX}"
 
 echo "::group::Container info"
 uname -a
@@ -57,7 +66,7 @@ cmake -B "${BUILD_DIR}" \
   -DMIRISDR=OFF \
   -DPULSEAUDIO=OFF \
   -DNFM=OFF \
-  -DSOAPYSDR=ON \
+  -DSOAPYSDR="${SOAPYSDR}" \
   -DRTLSDR=ON \
   -DBUILD_UNITTESTS=TRUE
 echo "::endgroup::"

@@ -53,7 +53,10 @@ libcurl), so the receiver must run the matching Debian version.
 
 The ATColombia receiver server's importer depends on this exactly.
 
-- Binary: `rtl_airband-<tag>-debian<11|12|13>-<linux-arm|linux-arm64|linux-amd64>`, for
+- Binary: `rtl_airband-<tag>-debian<11|12|13>-<linux-arm|linux-arm64|linux-amd64>[-soapy]`.
+  The plain build is RTL-SDR only (runs without libSoapySDR, like most
+  receivers); `-soapy` also enables SoapySDR for Airspy receivers. Each
+  manifest entry has `"flavor": "plain" | "soapy"`, for
   example `rtl_airband-v0.0.3-debian12-linux-arm64`. Stripped, mode 0755.
 - `SHA256SUMS`: one `sha256sum` line per binary.
 - `manifest.json`:
